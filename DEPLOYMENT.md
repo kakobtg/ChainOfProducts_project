@@ -1,16 +1,8 @@
 # ChainOfProduct - Deployment Guide
 
-**Important:** The existing `app/db.py` already provides a working database using local SQLite (`chainofproduct.db`) on the Application Server. You do **not** need a separate DB VM unless you intentionally want Postgres/MySQL. The Postgres instructions below are now marked optional.
+PostgreSQL on VM3 is required. VM2 (app + group) connects to VM3; VM1 runs the clients.
 
-## Architecture Overview (default)
-
-```
-VM1 (192.168.1.10) - Client
-    ↓ HTTP:8001, HTTP:8002
-VM2 (192.168.1.20) - Application Server + Group Server + SQLite (chainofproduct.db)
-```
-
-## Architecture Overview (optional Postgres on separate VM)
+## Architecture Overview
 
 ```
 VM1 (192.168.1.10) - Client
@@ -26,15 +18,18 @@ VM3 (192.168.1.30) - Database Server (Postgres)
 - Static IP addresses configured
 - Root/sudo access on all VMs
 - Internet connection for initial setup
-- If you only have 3 physical/host machines, you can still run by co-locating roles: put App+Group (VM2+VM4) on one VM, DB on another (VM3), and run clients from any machine (VM1) pointing to the App/Group IP. For the default SQLite setup, you only need VM1 (client) and VM2 (app+group+SQLite).
+- If you only have 3 physical/host machines, this layout is already 3 nodes: App+Group on VM2, DB on VM3, Clients on VM1 (or your laptop).
 
 ### Configure Static IPs on Kali (NetworkManager)
-Use `nmcli` (replace interface/connection names and IPs as needed):
+The setup scripts can configure static IPs automatically via `nmcli` when you pass:
+- `STATIC_IP_CIDR` (e.g., `192.168.1.10/24`)
+- `GATEWAY_IP` (e.g., `192.168.1.1`)
+- `DNS_SERVERS` (default `8.8.8.8 1.1.1.1`)
+- `CON_NAME` (default `"Wired connection 1"`)
+Manual example (if you prefer to run yourself):
 ```bash
 nmcli con show              # list connections (e.g., "Wired connection 1")
 nmcli dev status            # see device (e.g., eth0)
-
-# Example for 192.168.1.10/24 with gateway 192.168.1.1
 nmcli con mod "Wired connection 1" ipv4.addresses 192.168.1.10/24
 nmcli con mod "Wired connection 1" ipv4.gateway 192.168.1.1
 nmcli con mod "Wired connection 1" ipv4.dns "8.8.8.8 1.1.1.1"
@@ -48,15 +43,19 @@ Suggested layout (adjust to your LAN):
 
 ---
 
-## STEP 0: Default Database (SQLite on VM2)
+## STEP 1: VM3 Setup (Database Server - Postgres)
 
-- Nothing to install: `app/db.py` uses SQLite by default and writes `chainofproduct.db` in the working directory on VM2.
-- Ensure VM2 has persistent storage for `chainofproduct.db`.
-- If you stay on SQLite, **skip STEP 1** and go straight to STEP 2 for VM2, and STEP 3 for VM1.
+### 1.1 Install PostgreSQL (scripted)
+Recommended: run the helper script (sets static IP if provided, installs Postgres, configures pg_hba):
+```bash
+# On VM3
+cd ~/chainofproduct   # after cloning repo
+STATIC_IP_CIDR=192.168.1.30/24 GATEWAY_IP=192.168.1.1 \
+APP_VM_IP=192.168.1.20 DB_PASSWORD='Y0urStr0ngP@ssw0rd!' \
+scripts/setup_vm3_db.sh
+```
 
-## STEP 1 (OPTIONAL): VM3 Setup (Database Server - Postgres) - ONLY IF YOU WANT REMOTE POSTGRES
-
-### 1.1 Install PostgreSQL
+Manual steps (if you prefer):
 
 ```bash
 # SSH into VM3
@@ -206,7 +205,18 @@ echo "Connection string: postgresql://copuser:Y0urStr0ngP@ssw0rd!2024@192.168.1.
 
 ## STEP 2: VM2 Setup (Application + Group Server)
 
-### 2.1 Install Dependencies
+### 2.1 Install Dependencies (scripted)
+Recommended: use the helper script (can also set static IP):
+```bash
+# On VM2
+cd ~
+REPO_URL=<your-github-repo-url> \
+STATIC_IP_CIDR=192.168.1.20/24 GATEWAY_IP=192.168.1.1 \
+DATABASE_URL=postgresql://copuser:Y0urStr0ngP@ssw0rd!2024@192.168.1.30:5432/chainofproduct \
+scripts/setup_vm2_app_group.sh
+```
+
+Manual steps (if you prefer):
 
 ```bash
 # SSH into VM2
@@ -405,7 +415,18 @@ curl http://localhost:8002/
 
 ## STEP 3: VM1 Setup (Client)
 
-### 3.1 Install Dependencies
+### 3.1 Install Dependencies (scripted)
+Recommended: use the helper script (can also set static IP):
+```bash
+# On VM1
+cd ~
+REPO_URL=<your-github-repo-url> \
+STATIC_IP_CIDR=192.168.1.10/24 GATEWAY_IP=192.168.1.1 \
+APP_SERVER_URL=http://192.168.1.20:8001 GROUP_SERVER_URL=http://192.168.1.20:8002 \
+scripts/setup_vm1_client.sh
+```
+
+Manual steps (if you prefer):
 
 ```bash
 # SSH into VM1

@@ -11,9 +11,7 @@ ChainOfProduct enables secure Delivery-versus-Payment (DvP) transactions across 
 - **Integrity 2 (SR4)**: Disclosures are auditable
 - **Dynamic Groups**: Transactions can be shared with partner groups with time-based access control
 
-## Architecture
-
-### 4-VM Setup
+## Architecture (3-VM)
 
 ```
 ┌─────────────────┐
@@ -23,18 +21,19 @@ ChainOfProduct enables secure Delivery-versus-Payment (DvP) transactions across 
 └────────┬────────┘
          │ HTTPS
          ↓
-┌─────────────────────┐     ┌──────────────────┐
-│ VM2: App Server     │────→│ VM4: Group Server│
-│ (DMZ)               │     │ - Group mgmt     │
-│ - FastAPI           │     │ - Membership     │
-│ - Never sees        │     └──────────────────┘
+┌─────────────────────┐
+│ VM2: App + Group    │
+│ (DMZ)               │
+│ - FastAPI           │
+│ - Group mgmt        │
+│ - Never sees        │
 │   plaintext         │
 └────────┬────────────┘
          │ DB Protocol
          ↓
 ┌─────────────────────┐
 │ VM3: Database       │
-│ - SQLite/Postgres   │
+│ - PostgreSQL        │
 │ - Protected docs    │
 │ - Share records     │
 └─────────────────────┘
@@ -78,7 +77,7 @@ chainofproduct/
 │   ├── main.py             # FastAPI server
 │   ├── db.py               # Database operations
 │   └── models.py           # Data models
-├── groupserver/             # Group Server (VM4)
+├── groupserver/             # Group Server (runs with App on VM2)
 │   ├── __init__.py
 │   └── main.py             # Group management API
 ├── clients/                 # Client scripts (VM1)
@@ -124,53 +123,42 @@ curl -X POST http://localhost:8002/groups/create \
   -d '{"group_id": "tech_partners", "members": ["Auditor Corp", "Lays Chips"]}'
 ```
 
-### VM3: Database Server
+### VM3: Database Server (PostgreSQL)
+- Install Postgres and create a database/user (see `scripts/setup_vm3_db.sh`).
+- Expose port 5432 only to VM2.
+- Connection string example (use your values): `postgresql://copuser:StrongPass@<VM3_IP>:5432/chainofproduct`
 
-Database is automatically initialized by VM2 application server.
-
-For production, configure firewall rules:
+### VM2: Application + Group Server (DMZ)
+- Requires `DATABASE_URL` pointing to VM3.
+- Start application server on port 8001 and group server on 8002:
 ```bash
-# Only allow connections from VM2
-iptables -A INPUT -p tcp --dport 5432 -s <VM2_IP> -j ACCEPT
-iptables -A INPUT -p tcp --dport 5432 -j DROP
-```
-
-### VM2: Application Server (DMZ)
-
-```bash
-# Start application server on port 8001
-python -m app.main
-
-# Or with custom settings
+export DATABASE_URL=postgresql://copuser:StrongPass@<VM3_IP>:5432/chainofproduct
 python -c "from app.main import start_server; start_server(host='0.0.0.0', port=8001)"
+python -c "from groupserver.main import start_server; start_server(host='0.0.0.0', port=8002)"
 ```
 
 ## Running on Separate VMs (non-localhost)
 
-1. **Assign fixed IPs** (examples: VM1=10.0.0.11, VM2=10.0.0.12, VM4=10.0.0.14).
-2. **Start servers bound to all interfaces**  
-   - VM4: `python -c "from groupserver.main import start_server; start_server(host='0.0.0.0', port=8002)"`  
-   - VM2: `python -c "from app.main import start_server; start_server(host='0.0.0.0', port=8001)"`  
-     (Database is the local `chainofproduct.db` SQLite file on VM2; move to a network volume or switch to Postgres/MySQL on VM3 if you want a true remote DB.)
+1. **Assign fixed IPs** (examples: VM1=10.0.0.11, VM2=10.0.0.12, VM3=10.0.0.13).
+2. **Start servers bound to all interfaces** on VM2 (app+group) with `DATABASE_URL` pointing at VM3.
 3. **Point clients at the remote servers** (VM1 or any other machine):
    ```bash
    export APP_SERVER_URL=http://10.0.0.12:8001
-   export GROUP_SERVER_URL=http://10.0.0.14:8002
+   export GROUP_SERVER_URL=http://10.0.0.12:8002
    python clients/seller_client.py
    python clients/buyer_client.py
    python clients/third_party_client.py
    ```
    You can also pass URLs directly when constructing `SellerClient`, `BuyerClient`, or `ThirdPartyClient` if you embed these classes elsewhere.
-4. **Open firewall rules** so VM1 can reach VM2:8001 and VM2 can reach VM4:8002 (see rules below).
+4. **Open firewall rules** so VM1 can reach VM2:8001/8002 and VM2 can reach VM3:5432 (see rules below).
 
 ## Firewall Configuration
 You can use either `iptables` or `ufw`. Open only what you need:
 
 ### Quick `ufw` example (recommended)
 - VM1 (Client): `ufw allow out to <VM2_IP> port 8001 proto tcp`
-- VM2 (App): `ufw allow in on eth0 from <VM1_IP> to any port 8001 proto tcp`; `ufw allow out to <VM3_IP> port 5432 proto tcp`; `ufw allow out to <VM4_IP> port 8002 proto tcp`
+- VM2 (App + Group): `ufw allow in on eth0 from <VM1_IP> to any port 8001,8002 proto tcp`; `ufw allow out to <VM3_IP> port 5432 proto tcp`
 - VM3 (DB): `ufw allow in on eth0 from <VM2_IP> to any port 5432 proto tcp`
-- VM4 (Group): `ufw allow in on eth0 from <VM2_IP> to any port 8002 proto tcp`
 - Default policies: `ufw default deny incoming`; `ufw default deny outgoing` (or at least deny incoming); enable: `ufw enable`
 
 ### `iptables` example
@@ -185,12 +173,10 @@ iptables -A OUTPUT -p tcp -d <VM2_IP> --dport 8001 -j ACCEPT
 ```bash
 # Allow inbound HTTPS from VM1
 iptables -A INPUT -p tcp -s <VM1_IP> --dport 8001 -j ACCEPT
+iptables -A INPUT -p tcp -s <VM1_IP> --dport 8002 -j ACCEPT
 
 # Allow outbound to VM3 (database)
 iptables -A OUTPUT -p tcp -d <VM3_IP> --dport 5432 -j ACCEPT
-
-# Allow outbound to VM4 (group server)
-iptables -A OUTPUT -p tcp -d <VM4_IP> --dport 8002 -j ACCEPT
 
 # Drop everything else
 iptables -A INPUT -j DROP
@@ -201,13 +187,6 @@ iptables -A OUTPUT -j DROP
 ```bash
 # Only allow inbound from VM2
 iptables -A INPUT -p tcp -s <VM2_IP> --dport 5432 -j ACCEPT
-iptables -A INPUT -j DROP
-```
-
-#### VM4 (Group Server)
-```bash
-# Allow inbound from VM2
-iptables -A INPUT -p tcp -s <VM2_IP> --dport 8002 -j ACCEPT
 iptables -A INPUT -j DROP
 ```
 
@@ -229,20 +208,16 @@ nmcli con up "Wired connection 1"
 ```
 Example layout (adjust to your LAN):
 - VM1 (Client): 10.0.0.11
-- VM2 (App Server): 10.0.0.12
+- VM2 (App + Group): 10.0.0.12
 - VM3 (DB): 10.0.0.13
-- VM4 (Group Server): 10.0.0.14
 
-If you only have **three machines**, you can still run by co-locating roles:
-- Option A: VM2 hosts both App Server and DB (SQLite/Postgres) → no VM3 needed.
-- Option B: VM2 hosts App Server, VM3 hosts DB, VM4 hosts Group Server; run clients on your laptop instead of a dedicated VM1.
-Just set the env vars to the correct IPs for wherever the services run.
+If you only have **three machines**, this is the intended layout: VM2 runs both the application and group server; VM3 is the dedicated Postgres DB; VM1 (or your laptop) runs clients. Just set the env vars to the correct IPs.
 
 ### VM1: Client
 1. Install deps: `pip install -r requirements.txt`
 2. Set endpoints:  
    `export APP_SERVER_URL=http://<VM2_IP>:8001`  
-   `export GROUP_SERVER_URL=http://<VM4_IP>:8002`
+   `export GROUP_SERVER_URL=http://<VM2_IP>:8002`
 3. Generate keys (once per company):  
    `python -m chainofproduct.cli keygen "Ching Chong Extractions"`  
    `python -m chainofproduct.cli keygen "Lays Chips"`  
@@ -250,26 +225,19 @@ Just set the env vars to the correct IPs for wherever the services run.
 4. Run demos:  
    `python clients/seller_client.py` then `python clients/buyer_client.py` then `python clients/third_party_client.py`
 
-### VM2: Application Server (DMZ)
+### VM2: Application + Group Server (DMZ)
 1. Install deps: `pip install -r requirements.txt`
-2. (Optional) Point DB to remote Postgres/MySQL if not using local SQLite.
-3. Start server bound to all interfaces:  
-   `python -c "from app.main import start_server; start_server(host='0.0.0.0', port=8001)"`
-4. Ensure firewall allows inbound from VM1 on 8001 and outbound to VM3:5432 (if remote DB) and VM4:8002.
+2. Set database connection:  
+   `export DATABASE_URL=postgresql://<DB_USER>:<DB_PASS>@<VM3_IP>:5432/chainofproduct`
+3. Start servers bound to all interfaces:  
+   `python -c "from app.main import start_server; start_server(host='0.0.0.0', port=8001)"`  
+   `python -c "from groupserver.main import start_server; start_server(host='0.0.0.0', port=8002)"`
+4. Ensure firewall allows inbound from VM1 on 8001/8002 and outbound to VM3:5432.
 
 ### VM3: Database Server
-1. If staying with SQLite, you can skip this VM (SQLite lives on VM2).  
-   For a real DB, install and run Postgres/MySQL listening on `0.0.0.0:5432` (or chosen port).
-2. Create DB/user and update app config (modify `app/db.py` or add env vars if you extend it).
+1. Install and run PostgreSQL listening on `0.0.0.0:5432` (or chosen port).
+2. Create DB/user and grant privileges (see `scripts/setup_vm3_db.sh`).
 3. Firewall: allow inbound only from VM2 on DB port.
-
-### VM4: Group Server
-1. Install deps: `pip install -r requirements.txt`
-2. Start server:  
-   `python -c "from groupserver.main import start_server; start_server(host='0.0.0.0', port=8002)"`
-3. Firewall: allow inbound from VM2 on 8002.
-4. Seed groups (from any machine with access):  
-   `curl -X POST http://<VM4_IP>:8002/groups/create -H "Content-Type: application/json" -d '{"group_id": "tech_partners", "members": ["Auditor Corp", "Lays Chips"]}'`
 
 ## TLS Configuration
 
@@ -279,7 +247,7 @@ Just set the env vars to the correct IPs for wherever the services run.
 # For VM2 (Application Server)
 openssl req -x509 -newkey rsa:4096 -keyout app_key.pem -out app_cert.pem -days 365 -nodes
 
-# For VM4 (Group Server)
+# For VM2 (Group Server) - can reuse app cert or generate separate
 openssl req -x509 -newkey rsa:4096 -keyout group_key.pem -out group_cert.pem -days 365 -nodes
 ```
 

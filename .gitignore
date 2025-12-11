@@ -27,3 +27,8 @@ groupserver/groups.json
 Thumbs.db
 .idea/
 .vscode/
+
+# Shell scripts separate download
+/scripts
+.sh
+

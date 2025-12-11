@@ -4,6 +4,7 @@ Application Server (DMZ) - VM2
 FastAPI server that never sees plaintext transactions
 """
 
+import os
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
@@ -31,8 +32,11 @@ app.add_middleware(
 )
 
 # Database connection
-# In production, this would connect to VM3 over internal network
-db = Database()
+db_url = os.getenv("DATABASE_URL")
+if not db_url:
+    raise RuntimeError("DATABASE_URL must be set to the Postgres connection string (VM3)")
+# Connect to VM3 over the internal network
+db = Database(db_url)
 
 
 @app.get("/")
