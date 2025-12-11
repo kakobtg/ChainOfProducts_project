@@ -1,13 +1,23 @@
-# ChainOfProduct - Complete 3-VM Deployment Guide
+# ChainOfProduct - Deployment Guide
 
-## Architecture Overview
+**Important:** The existing `app/db.py` already provides a working database using local SQLite (`chainofproduct.db`) on the Application Server. You do **not** need a separate DB VM unless you intentionally want Postgres/MySQL. The Postgres instructions below are now marked optional.
+
+## Architecture Overview (default)
+
+```
+VM1 (192.168.1.10) - Client
+    ↓ HTTP:8001, HTTP:8002
+VM2 (192.168.1.20) - Application Server + Group Server + SQLite (chainofproduct.db)
+```
+
+## Architecture Overview (optional Postgres on separate VM)
 
 ```
 VM1 (192.168.1.10) - Client
     ↓ HTTP:8001, HTTP:8002
 VM2 (192.168.1.20) - Application Server + Group Server
     ↓ PostgreSQL:5432
-VM3 (192.168.1.30) - Database Server
+VM3 (192.168.1.30) - Database Server (Postgres)
 ```
 
 ## Prerequisites
@@ -16,7 +26,7 @@ VM3 (192.168.1.30) - Database Server
 - Static IP addresses configured
 - Root/sudo access on all VMs
 - Internet connection for initial setup
-- If you only have 3 physical/host machines, you can still run by co-locating roles: put App+Group (VM2+VM4) on one VM, DB on another (VM3), and run clients from any machine (VM1) pointing to the App/Group IP.
+- If you only have 3 physical/host machines, you can still run by co-locating roles: put App+Group (VM2+VM4) on one VM, DB on another (VM3), and run clients from any machine (VM1) pointing to the App/Group IP. For the default SQLite setup, you only need VM1 (client) and VM2 (app+group+SQLite).
 
 ### Configure Static IPs on Kali (NetworkManager)
 Use `nmcli` (replace interface/connection names and IPs as needed):
@@ -38,7 +48,13 @@ Suggested layout (adjust to your LAN):
 
 ---
 
-## STEP 1: VM3 Setup (Database Server) - DO THIS FIRST!
+## STEP 0: Default Database (SQLite on VM2)
+
+- Nothing to install: `app/db.py` uses SQLite by default and writes `chainofproduct.db` in the working directory on VM2.
+- Ensure VM2 has persistent storage for `chainofproduct.db`.
+- If you stay on SQLite, **skip STEP 1** and go straight to STEP 2 for VM2, and STEP 3 for VM1.
+
+## STEP 1 (OPTIONAL): VM3 Setup (Database Server - Postgres) - ONLY IF YOU WANT REMOTE POSTGRES
 
 ### 1.1 Install PostgreSQL
 
@@ -206,22 +222,13 @@ sudo apt install -y python3 python3-pip python3-venv postgresql-client git
 pip3 install --user cryptography fastapi uvicorn[standard] pydantic psycopg2-binary
 ```
 
-### 2.2 Setup Project Structure
+### 2.2 Clone Project
 
 ```bash
-# Create project directory
-mkdir -p ~/chainofproduct/app
-mkdir -p ~/chainofproduct/groupserver
-
+# Clone from GitHub (replace URL with your repo)
+cd ~
+git clone <your-github-repo-url> chainofproduct
 cd ~/chainofproduct
-
-# Copy server files here:
-# - app/main.py
-# - app/db.py
-# - app/models.py
-# - app/__init__.py
-# - groupserver/main.py
-# - groupserver/__init__.py
 ```
 
 ### 2.3 Configure Database Connection
@@ -417,22 +424,10 @@ pip3 install --user cryptography requests
 ### 3.2 Setup Project Structure
 
 ```bash
-# Create project directory
-mkdir -p ~/chainofproduct/chainofproduct
-mkdir -p ~/chainofproduct/clients
-mkdir -p ~/chainofproduct/keys
-
+# Clone from GitHub (replace URL with your repo)
+cd ~
+git clone <your-github-repo-url> chainofproduct
 cd ~/chainofproduct
-
-# Copy client files here:
-# - chainofproduct/crypto.py
-# - chainofproduct/keymanager.py
-# - chainofproduct/library.py
-# - chainofproduct/cli.py
-# - chainofproduct/__init__.py
-# - clients/seller_client.py
-# - clients/buyer_client.py
-# - clients/third_party_client.py
 ```
 
 ### 3.3 Configure Environment
