@@ -1,0 +1,29 @@
+# Bytecode and caches
+__pycache__/
+*.py[cod]
+
+# Virtualenvs
+.env/
+.venv/
+env/
+venv/
+
+# Distribution / build
+build/
+dist/
+*.egg-info/
+
+# Databases and state
+*.db
+*.sqlite
+
+# Keys and secrets
+keys/
+public_keys.json
+groupserver/groups.json
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
