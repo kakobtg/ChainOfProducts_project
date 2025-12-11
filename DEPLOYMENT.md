@@ -16,6 +16,25 @@ VM3 (192.168.1.30) - Database Server
 - Static IP addresses configured
 - Root/sudo access on all VMs
 - Internet connection for initial setup
+- If you only have 3 physical/host machines, you can still run by co-locating roles: put App+Group (VM2+VM4) on one VM, DB on another (VM3), and run clients from any machine (VM1) pointing to the App/Group IP.
+
+### Configure Static IPs on Kali (NetworkManager)
+Use `nmcli` (replace interface/connection names and IPs as needed):
+```bash
+nmcli con show              # list connections (e.g., "Wired connection 1")
+nmcli dev status            # see device (e.g., eth0)
+
+# Example for 192.168.1.10/24 with gateway 192.168.1.1
+nmcli con mod "Wired connection 1" ipv4.addresses 192.168.1.10/24
+nmcli con mod "Wired connection 1" ipv4.gateway 192.168.1.1
+nmcli con mod "Wired connection 1" ipv4.dns "8.8.8.8 1.1.1.1"
+nmcli con mod "Wired connection 1" ipv4.method manual
+nmcli con up "Wired connection 1"
+```
+Suggested layout (adjust to your LAN):
+- VM1 (Client): 192.168.1.10
+- VM2 (App + Group): 192.168.1.20
+- VM3 (DB): 192.168.1.30
 
 ---
 
